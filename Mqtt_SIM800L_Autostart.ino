@@ -91,7 +91,7 @@ void setup() {
   delay(100);
   Serial.begin(9600);                       //скорость порта
   SIM800.begin(9600);                       //скорость связи с модемом
-  Serial.println("MQTT |12/02/2019");
+  Serial.println("MQTT |06/10/2019");
   SIM800_reset();
 
   // attachInterrupt(0, callback, FALLING);  // включаем прерывание при переходе 1 -> 0 на D2, или 0 -> 1 на ножке оптопары
@@ -206,7 +206,7 @@ void detection() {                                                // услов�
   if (interval==2) {getLocation();}
     if (interval < 1 && broker==false) {
       Serial.println("Connect to MQTT Broker.");
-      interval = 1, SIM800.println("AT+SAPBR=2,1"), delay (200);   // подключаемся к GPRS
+      interval = 1, SIM800.println("AT+SAPBR=2,1"), delay (30);   // подключаемся к GPRS
     }
     if (interval < 1) interval = 6, MQTT_PUB_ALL();
     
@@ -298,7 +298,7 @@ void MQTT_PUB_ALL(){
       SIM800.write(0x1A);
       interval=6;
     } else {
-      interval = 1, SIM800.println("AT+SAPBR=2,1"), delay (200);
+      interval = 1, SIM800.println("AT+SAPBR=2,1"), delay (20);
     }
   }
 
@@ -336,11 +336,11 @@ void resp_modem () {    //------------------ АНЛИЗИРУЕМ БУФЕР В�
     SIM800.println("AT+SAPBR=3,1, \"APN\",\"" + APN + "\"");// , delay (500);
   }
   else if (at.indexOf("AT+SAPBR=3,1, \"APN\",\"" + APN + "\"\r\r\nOK") > -1 )   {
-    SIM800.println("AT+SAPBR=1,1"), interval = 1 ; // устанавливаем соеденение
+    SIM800.println("AT+SAPBR=1,1"), interval = 1, delay (200) ; // устанавливаем соеденение
   }
   else if (at.indexOf("+SAPBR: 1,1") > -1 )        {
-    //delay (200),  
-    SIM800.println("AT+CIPSTART=\"TCP\",\"" + MQTT_SERVER + "\",\"" + PORT + "\"");//, delay (1000);
+    delay (200),  
+    SIM800.println("AT+CIPSTART=\"TCP\",\"" + MQTT_SERVER + "\",\"" + PORT + "\""), delay (200);
   }
   else if (at.indexOf("CONNECT FAIL") > -1 )       {
     SIM800.println("AT+CFUN=1,1"), error_CF++, delay (1000), interval = 3 ; // костыль 1
