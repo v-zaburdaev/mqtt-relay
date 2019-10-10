@@ -55,7 +55,11 @@ String call_phone =  "+79202544485";       // телефон входящего 
 //String call_phone3 = "+375000000002";       // телефон для автосброса
 //String call_phone4 = "+375000000003";       // телефон для автосброса
 String APN = "internet.mts.ru";             // тчка доступа выхода в интернет вашего сотового оператора
+enum mode {
+  RESET,
+  SIMINIT,
 
+}
 /*  ----------------------------------------- ДАЛЕЕ НЕ ТРОГАЕМ ---------------------------------------------------------------   */
 //float Vstart = 13.20;                        // порог распознавания момента запуска по напряжению
 String pin = "";                            // строковая переменная набираемого пинкода
@@ -76,26 +80,15 @@ void setup() {
   pinMode(RESET_Pin, OUTPUT);
   pinMode(FIRST_P_Pin, OUTPUT);
   pinMode(SECOND_P,    OUTPUT);
-  //pinMode(STARTER_Pin, OUTPUT);
-  //pinMode(Lock_Pin,    OUTPUT);
-  //pinMode(Unlock_Pin,  OUTPUT);
   pinMode(LED_Pin,     OUTPUT);
-  //pinMode(IMMO,        OUTPUT);
-  //pinMode(K5,          OUTPUT);
-
   pinMode(3, INPUT_PULLUP);                 //  для плат до 1.7.2 с оптопарами
   pinMode(2, INPUT_PULLUP);                 //  для плат до 1.7.2 с оптопарами
-  // pinMode(3, INPUT);                      //  для плат от 5.3.0 с делителем на резистрах
-  // pinMode(2, INPUT);                      //  для плат от 5.3.0 с делителем на резистрах
 
   delay(100);
   Serial.begin(9600);                       //скорость порта
   SIM800.begin(9600);                       //скорость связи с модемом
   Serial.println("MQTT |06/10/2019");
   SIM800_reset();
-
-  // attachInterrupt(0, callback, FALLING);  // включаем прерывание при переходе 1 -> 0 на D2, или 0 -> 1 на ножке оптопары
-  // attachInterrupt(1, callback, FALLING);  // включаем прерывание при переходе 1 -> 0 на D3, или 0 -> 1 на ножке оптопары
 }
 
 
@@ -213,21 +206,15 @@ void detection() {                                                // услов�
 }
 
 void playDtmf(){
-    //AT+VTD=4
-    //AT+VTS=<dtmf-string>
-    //AT+VTD=1;+CLDTMF=10,10
     SIM800.println("AT+VTD=1;+VTS=1");
     delay(400);
     SIM800.println("AT+VTD=1;+VTS=0");
-    //SIM800.println("AT+VTS='01'");
-
   }
 
 
 
 void resp_serial () {    // ---------------- ТРАНСЛИРУЕМ КОМАНДЫ из ПОРТА В МОДЕМ ----------------------------------
   String at = "";
-  //    while (Serial.available()) at = Serial.readString();
   int k = 0;
   while (Serial.available()) k = Serial.read(), at += char(k), delay(1);
   SIM800.println(at), at = "";
@@ -308,8 +295,6 @@ void resp_modem () {    //------------------ АНЛИЗИРУЕМ БУФЕР В�
   int k = 0;
   while (SIM800.available()) k = SIM800.read(), at += char(k), delay(1);
   Serial.println  ("resp:"+String(at));
-//  Serial.println();
-
   if (at.indexOf("+CLIP: \"" + call_phone + "\",") > -1) {
     delay(200);
     SIM800.println("AT+DDET=1");
@@ -361,8 +346,6 @@ void resp_modem () {    //------------------ АНЛИЗИРУЕМ БУФЕР В�
 
   else if (at.indexOf("+CIPGSMLOC: 0,") > -1   )   {
     LOC = at.substring(26, 35) + "," + at.substring(16, 25);
-    //SIM800.println("AT+CIPSEND"), delay (200);
-    
   }
 
   else if (at.indexOf("+CUSD:") > -1   )           {
