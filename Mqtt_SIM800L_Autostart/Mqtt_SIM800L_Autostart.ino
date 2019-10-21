@@ -43,23 +43,17 @@ SoftwareSerial SIM800(7, 6);                // для старых плат на
 //OneWire oneWire(ONE_WIRE_BUS);
 //DallasTemperature sensors(&oneWire);
 /*  ----------------------------------------- НАСТРОЙКИ MQTT брокера---------------------------------------------------------   */
-const char MQTT_user[10] = "kgltdagp";      // api.cloudmqtt.com > Details > User
+const char MQTT_user[9] = "kgltdagp";      // api.cloudmqtt.com > Details > User
 const char MQTT_pass[15] = "KeIN2CNFNLHp";  // api.cloudmqtt.com > Details > Password
-const char MQTT_type[15] = "MQIsdp";        // тип протокола НЕ ТРОГАТЬ !
-const char MQTT_CID[15] = "STAREX";        // уникальное имя устройства в сети MQTT
-String MQTT_SERVER = "m15.cloudmqtt.com";   // api.cloudmqtt.com > Details > Server  сервер MQTT брокера
-String PORT = "12319";                      // api.cloudmqtt.com > Details > Port    порт MQTT брокера НЕ SSL !
+const char MQTT_type[7] = "MQIsdp";        // тип протокола НЕ ТРОГАТЬ !
+const char MQTT_CID[8] = "STAREX";        // уникальное имя устройства в сети MQTT
+const String MQTT_SERVER = "m15.cloudmqtt.com";   // api.cloudmqtt.com > Details > Server  сервер MQTT брокера
+const String PORT = "12319";                      // api.cloudmqtt.com > Details > Port    порт MQTT брокера НЕ SSL !
+const String version="MQTT|06/10/2019";
 /*  ----------------------------------------- ИНДИВИДУАЛЬНЫЕ НАСТРОЙКИ !!!---------------------------------------------------------   */
-String call_phone =  "+79202544485";       // телефон входящего вызова  для управления DTMF
-//String call_phone2 = "+375000000001";       // телефон для автосброса могут работать не корректно
-//String call_phone3 = "+375000000002";       // телефон для автосброса
-//String call_phone4 = "+375000000003";       // телефон для автосброса
-String APN = "internet.mts.ru";             // тчка доступа выхода в интернет вашего сотового оператора
-enum mode {
-  RESET,
-  SIMINIT,
+const String call_phone =  "+79202544485";       // телефон входящего вызова  для управления DTMF
+const String APN = "internet.mts.ru";             // тчка доступа выхода в интернет вашего сотового оператора
 
-}
 /*  ----------------------------------------- ДАЛЕЕ НЕ ТРОГАЕМ ---------------------------------------------------------------   */
 //float Vstart = 13.20;                        // порог распознавания момента запуска по напряжению
 String pin = "";                            // строковая переменная набираемого пинкода
@@ -70,11 +64,14 @@ float m = 57.701915071; //58.3402489626556;                            // дел
 unsigned long Time1, Time2 = 0;
 int Timer1 = 10, Timer2 = 10, count, error_CF, error_C, defaultTimer1=10, defaultTimer2=10;
 int interval = 1;                           // интервал тправки данных на сервер после загрузки ардуино
+int connectTry = 0;
 bool relay1 = false, relay2=false;          // переменная состояния режим прогрева двигателя
 bool ring = false;                          // флаг момента снятия трубки
 bool broker = false;                        // статус подклюлючения к брокеру
 bool Security = false;                      // состояние охраны после подачи питания
 String LOC="";
+
+void(* resetFunc) (void) = 0; //declare reset function @ address 0
 
 void setup() {
   pinMode(RESET_Pin, OUTPUT);
@@ -87,7 +84,7 @@ void setup() {
   delay(100);
   Serial.begin(9600);                       //скорость порта
   SIM800.begin(9600);                       //скорость связи с модемом
-  Serial.println("MQTT |06/10/2019");
+  Serial.println(version);
   SIM800_reset();
 }
 
@@ -133,12 +130,12 @@ void loop() {
 
 
 void relay1start() {                                              // программа запуска двигателя
-    Serial.println("Relay 1 ON");
+    Serial.println("R1 ON");
     Timer1 = defaultTimer1;                                                     // устанавливаем таймер
     pushRelay1();
     relay1=true;
     MQTT_PUB_ALL();
-    Serial.println ("OUT"), interval = 1;
+    interval = 1;
 }
 void relay1stop() {                                // программа остановки прогрева двигателя
   if(!(defaultTimer1==30 && Timer1==0)){
@@ -146,7 +143,7 @@ void relay1stop() {                                // программа ост�
   } 
   
   relay1 = false, Timer1 = defaultTimer1;
-  Serial.println ("Relay 1 OFF");
+  Serial.println ("R1 OFF");
   MQTT_PUB_ALL();
 }
 
@@ -157,7 +154,7 @@ void pushRelay1(){
   }
 
 void relay2start() {                                              // программа запуска двигателя
-    Serial.println("Relay 2 ON");
+    Serial.println("R2 ON");
     Timer1 = defaultTimer1;                                                     // устанавливаем таймер
     digitalWrite(SECOND_P, HIGH);
     relay2=true;
@@ -168,7 +165,7 @@ void relay2start() {                                              // прогр�
 void relay2stop() {                                // программа остановки прогрева двигателя
   digitalWrite(SECOND_P,    LOW), delay (100);
   relay2 = false, Timer2 = defaultTimer2;
-  Serial.println ("Relay 2 OFF");
+  Serial.println ("R2 OFF");
   MQTT_PUB_ALL();
 }
 
@@ -227,6 +224,11 @@ void  MQTT_FloatPub (const char topic[15], float val, int x) {
 }
 
 void MQTT_CONNECT () {
+  if(connectTry>=10) {
+    Serial.println("RSTALL");
+    resetFunc();
+    
+  }
   Serial.println("MQTT_CONNECT");
   SIM800.println("AT+CIPSEND"), delay (100);
 
@@ -247,6 +249,7 @@ void MQTT_CONNECT () {
   SIM800.write(0x1A);
   broker = true;
   interval=6;
+  connectTry++;
 }                                         // маркер завершения пакета
 
 void  MQTT_PUB (const char MQTT_topic[35], const char MQTT_messege[35]) {          // пакет на публикацию
