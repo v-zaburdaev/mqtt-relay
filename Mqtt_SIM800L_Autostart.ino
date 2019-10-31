@@ -1,6 +1,20 @@
-
+#include <avr/wdt.h>
 #include <SoftwareSerial.h>
 //#include <DallasTemperature.h>      // https://github.com/milesburton/Arduino-Temperature-Control-Library
+
+#include <stdint.h>
+
+uint8_t mcusr_mirror __attribute__ ((section (".noinit")));
+
+void get_mcusr(void) \
+  __attribute__((naked)) \
+  __attribute__((section(".init3")));
+void get_mcusr(void)
+{
+  mcusr_mirror = MCUSR;
+  MCUSR = 0;
+  wdt_disable();
+}
 
 //  ----------------------------------------- НАЗНАЧАЕМ ВЫВОДЫ для платок до 1.7.6 (c Arduino Pro Mini) ------------------------------
 
@@ -19,6 +33,18 @@ SoftwareSerial SIM800(7, 6);                // для старых плат на
 #define K5           A5                     // на плате не реализован, снимать сигнал с ардуинки
 #define IMMO         A4                     // на плате не реализован, снимать сигнал с ардуинк
 #define RESET_Pin    5                      // аппаратная перезагрузка модема, по сути не задействован
+
+
+#define MODE_RESET 0
+#define MODE_RESET_MODEM 1
+#define MODE_MODEM_INIT 2
+#define MODE_MODEM_OK 3
+#define MODE_INIT_GPRS 4
+#define MODE_INIT_GPRS_OK 5
+#define MODE_CONNECT_MQTT 6
+#define MODE_MQTT_CONNECTED 7
+
+
 
 //  ----------------------------------------- НАЗНАЧАЕМ ВЫВОДЫ для платок от 5.3.0  (c Atmega328 на самой плате)---------------------
 /*
@@ -55,13 +81,13 @@ String call_phone =  "+79202544485";       // телефон входящего 
 //String call_phone3 = "+375000000002";       // телефон для автосброса
 //String call_phone4 = "+375000000003";       // телефон для автосброса
 String APN = "internet.mts.ru";             // тчка доступа выхода в интернет вашего сотового оператора
-enum mode {
-  RESET,
-  SIMINIT,
-
-}
+//enum mode {
+//  RESET,
+//  SIMINIT
+//}
 /*  ----------------------------------------- ДАЛЕЕ НЕ ТРОГАЕМ ---------------------------------------------------------------   */
 //float Vstart = 13.20;                        // порог распознавания момента запуска по напряжению
+int mode=MODE_RESET;
 String pin = "";                            // строковая переменная набираемого пинкода
 //float TempDS[11];                           // массив хранения температуры c рахных датчиков
 float Vbat, V_min;                                // переменная хранящая напряжение бортовой сети
@@ -70,6 +96,8 @@ float m = 57.701915071; //58.3402489626556;                            // дел
 unsigned long Time1, Time2 = 0;
 int Timer1 = 10, Timer2 = 10, count, error_CF, error_C, defaultTimer1=10, defaultTimer2=10;
 int interval = 1;                           // интервал тправки данных на сервер после загрузки ардуино
+int connecttry = 0;
+int sendtry =0;
 bool relay1 = false, relay2=false;          // переменная состояния режим прогрева двигателя
 bool ring = false;                          // флаг момента снятия трубки
 bool broker = false;                        // статус подклюлючения к брокеру
@@ -77,6 +105,7 @@ bool Security = false;                      // состояние охраны �
 String LOC="";
 
 void setup() {
+//   wdt_disable();
   pinMode(RESET_Pin, OUTPUT);
   pinMode(FIRST_P_Pin, OUTPUT);
   pinMode(SECOND_P,    OUTPUT);
@@ -98,8 +127,12 @@ void SIM800_reset() {
   digitalWrite(RESET_Pin, LOW);
   delay(400);
   digitalWrite(RESET_Pin, HIGH);
-  SIM800.println("AT+CLIP=1;+DDET=1;+CFUN=1,1;"); // Активируем АОН и декодер DTMF
-  delay(100);
+  //delay(4000);
+  //SIM800.println("AT+CLIP=1;+DDET=1;+CFUN=1,1;"); // Активируем АОН и декодер DTMF
+  //delay(100);
+  sendtry=0;
+  mode=MODE_MODEM_INIT;
+  Serial.println("Modem reset");
 }                        // перезагрузка модема
 
 // функция дергания реле блокировки/разблокировки дверей с паузой "удержания кнопки" в 0,5 сек.
@@ -199,7 +232,14 @@ void detection() {                                                // услов�
   if (interval==2) {getLocation();}
     if (interval < 1 && broker==false) {
       Serial.println("Connect to MQTT Broker.");
-      interval = 1, SIM800.println("AT+SAPBR=2,1"), delay (30);   // подключаемся к GPRS
+      connecttry++;
+      if(connecttry>5) {
+        connecttry=0;
+        Serial.println("Reset");
+        SIM800_reset();
+      }
+      interval = 1, SIM800.println("AT+SAPBR=2,1");
+      delay (30);   // подключаемся к GPRS
     }
     if (interval < 1) interval = 6, MQTT_PUB_ALL();
     
@@ -269,8 +309,13 @@ void getLocation(){
   }
 void MQTT_PUB_ALL(){
     Vbat = VoltRead();                                            // замеряем напряжение на батарее
+    if(sendtry>2){
+        Serial.println("Reset by sendtry");
+        SIM800_reset();
+    }
     if(broker==true){
-      Serial.println("MQTT_PUB_ALL");
+      sendtry++;
+      Serial.println("MQTT_PUB_ALL sendtry="+String(sendtry));
       SIM800.println("AT+CIPSEND"), delay (200); // если не "влезает" "ALREADY CONNECT"
       MQTT_FloatPub ("C5/vbat",     Vbat, 2);
       MQTT_FloatPub ("C5/timer1",    Timer1, 0);
@@ -284,6 +329,7 @@ void MQTT_PUB_ALL(){
       MQTT_FloatPub ("C5/CF", error_CF, 0);
       SIM800.write(0x1A);
       interval=6;
+      
     } else {
       interval = 1, SIM800.println("AT+SAPBR=2,1"), delay (20);
     }
@@ -295,6 +341,19 @@ void resp_modem () {    //------------------ АНЛИЗИРУЕМ БУФЕР В�
   int k = 0;
   while (SIM800.available()) k = SIM800.read(), at += char(k), delay(1);
   Serial.println  ("resp:"+String(at));
+//
+//  switch(mode){
+//    case MODE_MODEM_INIT:{
+//      Serial.println("MODE=MODEM_INIT");
+//      if (at.indexOf("SMS Ready") > -1 || at.indexOf("NO CARRIER") > -1 ) {
+//        Serial.println("Get: SMS READY. Send: AT+CLIP=1;+DDET=1");
+//        SIM800.println("AT+CLIP=1;+DDET=1"); // Активируем АОН и декодер DTMF
+//        mode=MODE_MODEM_OK;
+//      }
+//      break;
+//      }
+//    }
+    
   if (at.indexOf("+CLIP: \"" + call_phone + "\",") > -1) {
     delay(200);
     SIM800.println("AT+DDET=1");
@@ -311,6 +370,7 @@ void resp_modem () {    //------------------ АНЛИЗИРУЕМ БУФЕР В�
     if (pin.indexOf("*") > -1 ) pin = "";
   }
   else if (at.indexOf("SMS Ready") > -1 || at.indexOf("NO CARRIER") > -1 ) {
+    Serial.println("Get: SMS READY. Send: AT+CLIP=1;+DDET=1");
     SIM800.println("AT+CLIP=1;+DDET=1"); // Активируем АОН и декодер DTMF
   }
   /*  -------------------------------------- проверяем соеденеиние с ИНТЕРНЕТ, конектимся к серверу------------------------------------------------------- */
@@ -341,6 +401,10 @@ void resp_modem () {    //------------------ АНЛИЗИРУЕМ БУФЕР В�
   }
   else if (at.indexOf("CONNECT OK") > -1)          {
     MQTT_CONNECT();
+  }
+  else if (at.indexOf("SEND OK") > -1)          {
+    sendtry--;
+    Serial.println("Sended data");
   }
 
 
