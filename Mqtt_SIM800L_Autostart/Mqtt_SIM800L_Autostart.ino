@@ -278,7 +278,7 @@ void MQTT_FloatPub(const char topic[15], float val, int x)
 
 void MQTT_CONNECT()
 {
-  if (connectTry >= 10)
+  if (connecttry >= 10)
   {
     Serial.println("RSTALL");
     resetFunc();
@@ -303,7 +303,7 @@ void MQTT_CONNECT()
   SIM800.write(0x1A);
   broker = true;
   interval = 6;
-  connectTry++;
+  connecttry++;
 } // маркер завершения пакета
 
 void MQTT_PUB(const char MQTT_topic[35], const char MQTT_messege[35])
@@ -555,9 +555,8 @@ void resp_modem()
       at = "";
     }
   }
-  }
-default:
-{
+  
+default: {
   if (at.indexOf("+CLIP: \"" + call_phone + "\",") > -1)
   {
     delay(200);
