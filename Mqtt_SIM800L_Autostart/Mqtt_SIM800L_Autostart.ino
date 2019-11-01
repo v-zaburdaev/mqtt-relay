@@ -56,29 +56,9 @@ SoftwareSerial SIM800(7, 6); // для старых плат начиная с �
 #define MODE_CONNECT_MQTT_TIMER 30
 #define MODE_MQTT_CONNECTED 8
 #define MODE_MQTT_CONNECTED_TIMER 120
+#define MODE_SETFULL_FUNCTIONALITY 11
+#define MODE_SETFULL_FUNCTIONALITY_TIMER 10
 
-//  ----------------------------------------- НАЗНАЧАЕМ ВЫВОДЫ для платок от 5.3.0  (c Atmega328 на самой плате)---------------------
-/*
-  SoftwareSerial SIM800(4, 5);                // для новых плат начиная с 5.3.0 пины RX,TX
-  #define ONE_WIRE_BUS A5                     // пин датчика DS18B20, библиотека тут https://github.com/PaulStoffregen/OneWire
-  #define FIRST_P_Pin  10                     // на реле K1 на плате ПОТРЕБИТЕЛИ
-  #define SECOND_P     12                     // на реле К3 на плате ЗАЖИГАНИЕ
-  #define STARTER_Pin  11                     // на реле К2 на плате СТАРТЕР
-  #define IMMO         9                      // на реле K4 на плате под иммобилайзер
-  #define K5           8                      // на реле K5  внешнее под различные нужды, програмно не реализован
-  #define Lock_Pin     6                      // на реле K6 внешнее на кнопку "заблокировать дверь"
-  #define Unlock_Pin   7                      // на реле K7 внешнее на кнопку "разаблокировать дверь"
-  #define LED_Pin      13                     // на светодиод на плате
-  #define STOP_Pin     A0                     // вход IN3 на концевик педали тормоза для отключения режима прогрева
-  #define PSO_Pin      A1                     // вход IN4  на прочие датчики через делитель 39 kOhm / 11 kΩ
-  #define PSO_F        A2                     // обратная связь по реле K1, проверка на ключ в замке
-  #define RESET_Pin    A3                     // аппаратная перезагрузка модема, по сути не задействован
-  #define BAT_Pin      A7                     // внутри платы соединен с +12, через делитель напряжения 39кОм / 11 кОм
-  #define Feedback_Pin A6                     // обратная связь по реле K3, проверка на включенное зажигание
-*/
-
-//OneWire oneWire(ONE_WIRE_BUS);
-//DallasTemperature sensors(&oneWire);
 /*  ----------------------------------------- НАСТРОЙКИ MQTT брокера---------------------------------------------------------   */
 const char MQTT_user[9] = "kgltdagp";           // api.cloudmqtt.com > Details > User
 const char MQTT_pass[15] = "KeIN2CNFNLHp";      // api.cloudmqtt.com > Details > Password
@@ -115,7 +95,6 @@ void (*resetFunc)(void) = 0; //declare reset function @ address 0
 
 void setup()
 {
-  //   wdt_disable();
   pinMode(RESET_Pin, OUTPUT);
   pinMode(FIRST_P_Pin, OUTPUT);
   pinMode(SECOND_P, OUTPUT);
@@ -396,7 +375,7 @@ void resp_modem()
   int k = 0;
   while (SIM800.available())
     k = SIM800.read(), at += char(k), delay(1);
-  Serial.println("resp:" + String(at));
+  Serial.println("mode:"+String(mode)+"resp:" + String(at));
 
   switch (mode)
   {
@@ -416,7 +395,10 @@ void resp_modem()
     if (at.indexOf("OK") > -1)
     {
       init_gprs();
+    } else {
+      Serial.println("RESET_MODEM ERROR");
     }
+    
   }
 
   case MODE_INIT_GPRS:
@@ -427,6 +409,9 @@ void resp_modem()
       SIM800.println("AT+SAPBR=3,1,\"CONTYPE\",\"GPRS\"");
       mode = MODE_INIT_GPRS_SETCONTYPE;
       modeTimer = MODE_INIT_GPRS_SETCONTYPE_TIMER;
+    }
+    if (at.indexOf("DEACT") > -1){
+      
     }
   }
   case MODE_INIT_GPRS_SETCONTYPE:
@@ -461,10 +446,14 @@ void resp_modem()
     if (at.indexOf("CONNECT FAIL") > -1)
     {
       SIM800.println("AT+CFUN=1,1"), error_CF++, delay(1000), interval = 3; // костыль 1
+      mode=MODE_SETFULL_FUNCTIONALITY;
+      modeTimer=MODE_SETFULL_FUNCTIONALITY_TIMER;
     }
     else if (at.indexOf("CLOSED") > -1)
     {
       SIM800.println("AT+CFUN=1,1"), error_C++, delay(1000), interval = 3; // костыль 2
+      mode=MODE_SETFULL_FUNCTIONALITY;
+      modeTimer=MODE_SETFULL_FUNCTIONALITY_TIMER;
     }
     else if (at.indexOf("+CME ERROR:") > -1)
     {
@@ -482,6 +471,16 @@ void resp_modem()
     {
       mode = MODE_MQTT_CONNECTED;
       modeTimer = MODE_MQTT_CONNECTED_TIMER;
+    }
+  }
+  case MODE_SETFULL_FUNCTIONALITY:{
+    if (at.indexOf("OK") > -1)
+    {
+      init_gprs();
+    }
+    if(at.indexOf("+CME ERROR")>-1){
+      Serial.println("+CFUN error!");
+      SIM800_reset();
     }
   }
   case MODE_MQTT_CONNECTED:
@@ -579,55 +578,6 @@ default:
     if (pin.indexOf("*") > -1)
       pin = "";
   }
-  // else if (at.indexOf("SMS Ready") > -1 || at.indexOf("NO CARRIER") > -1)
-  // {
-  //   Serial.println("Get: SMS READY. Send: AT+CLIP=1;+DDET=1");
-  //   SIM800.println("AT+CLIP=1;+DDET=1"); // Активируем АОН и декодер DTMF
-  // }
-  /*  -------------------------------------- проверяем соеденеиние с ИНТЕРНЕТ, конектимся к серверу------------------------------------------------------- */
-  // else if (at.indexOf("+SAPBR: 1,3") > -1)
-  // {
-  //   SIM800.println("AT+SAPBR=3,1,\"CONTYPE\",\"GPRS\""); //, delay(200);
-  // }
-  // else if (at.indexOf("AT+SAPBR=3,1,\"CONTYPE\",\"GPRS\"\r\r\nOK") > -1)
-  // {
-  //   SIM800.println("AT+SAPBR=3,1, \"APN\",\"" + APN + "\""); // , delay (500);
-  // }
-  // else if (at.indexOf("AT+SAPBR=3,1, \"APN\",\"" + APN + "\"\r\r\nOK") > -1)
-  // {
-  //   SIM800.println("AT+SAPBR=1,1"), interval = 1, delay(200); // устанавливаем соеденение
-  // }
-  // else if (at.indexOf("+SAPBR: 1,1") > -1)
-  // {
-  //   delay(200),
-  //       SIM800.println("AT+CIPSTART=\"TCP\",\"" + MQTT_SERVER + "\",\"" + PORT + "\""), delay(200);
-  // }
-  // else if (at.indexOf("CONNECT FAIL") > -1)
-  // {
-  //   SIM800.println("AT+CFUN=1,1"), error_CF++, delay(1000), interval = 3; // костыль 1
-  // }
-  // else if (at.indexOf("CLOSED") > -1)
-  // {
-  //   SIM800.println("AT+CFUN=1,1"), error_C++, delay(1000), interval = 3; // костыль 2
-  // }
-  // else if (at.indexOf("+CME ERROR:") > -1)
-  // {
-  //   error_CF++; // костыль 4
-  //   if (error_CF > 5)
-  //   {
-  //     error_CF = 0, SIM800_reset();
-  //   }
-  // }
-  // else if (at.indexOf("CONNECT OK") > -1)
-  // {
-  //   MQTT_CONNECT();
-  // }
-  // else if (at.indexOf("SEND OK") > -1)
-  // {
-  //   sendtry--;
-  //   Serial.println("Sended data");
-  // }
-
   else if (at.indexOf("+CIPGSMLOC: 0,") > -1)
   {
     LOC = at.substring(26, 35) + "," + at.substring(16, 25);
@@ -661,81 +611,6 @@ default:
       MQTT_CONNECT();
     }
   }
-
-  // else if (at.indexOf("C5/comandlock1", 4) > -1)
-  // {
-  //   blocking(1), attachInterrupt(1, callback, FALLING); // команда постановки на охрану и включения прерывания по датчику вибрации
-  // }
-  // else if (at.indexOf("C5/comandlock0", 4) > -1)
-  // {
-  //   blocking(0), detachInterrupt(1); // команда снятия с хораны и отключения прерывания на датчик вибрации
-  // }
-  // else if (at.indexOf("C5/settimer1", 4) > -1)
-  // {
-  //   if (relay1 == true)
-  //   {
-  //     Timer1 = at.substring(at.indexOf("") + 16, at.indexOf("") + 19).toInt();
-  //     if (Timer1 > 30)
-  //       Timer1 = 30;
-  //   }
-  //   else
-  //   {
-  //     defaultTimer1 = at.substring(at.indexOf("") + 16, at.indexOf("") + 19).toInt();
-  //     if (defaultTimer1 > 30)
-  //       defaultTimer1 = 30;
-  //     Timer1 = defaultTimer1;
-  //   }
-  //   MQTT_PUB_ALL();
-  // }
-  // else if (at.indexOf("C5/settimer2", 4) > -1)
-  // {
-  //   if (relay2)
-  //   {
-  //     Timer2 = at.substring(at.indexOf("") + 16, at.indexOf("") + 19).toInt();
-  //   }
-  //   else
-  //   {
-  //     defaultTimer2 = at.substring(at.indexOf("") + 16, at.indexOf("") + 19).toInt();
-  //     Timer2 = defaultTimer2;
-  //   }
-  //   MQTT_PUB_ALL();
-  // }
-  // else if (at.indexOf("C5/comandbalans", 4) > -1)
-  // {
-  //   SIM800.println("AT+CUSD=1,\"*100#\""); // запрос баланса
-  // }
-  // else if (at.indexOf("C5/comandrssi", 4) > -1)
-  // {
-  //   SIM800.println("AT+CSQ"); // запрос уровня сигнала
-  // }
-  // else if (at.indexOf("C5/comandlocation", 4) > -1)
-  // {
-  //   SIM800.println("AT+CIPGSMLOC=1,1"); // запрос локации
-  // }
-  // else if (at.indexOf("C5/comandrelay1stop", 4) > -1)
-  // {
-  //   relay1stop(); // команда остановки прогрева
-  // }
-  // else if (at.indexOf("C5/comandrelay1start", 4) > -1)
-  // {
-  //   relay1start(); // команда запуска прогрева
-  // }
-  // else if (at.indexOf("C5/comandrelay2stop", 4) > -1)
-  // {
-  //   relay2stop(); // команда остановки прогрева
-  // }
-  // else if (at.indexOf("C5/comandrelay2start", 4) > -1)
-  // {
-  //   relay2start(); // команда запуска прогрева
-  // }
-  // else if (at.indexOf("C5/comandRefresh", 4) > -1)
-  // {
-  //   // Serial.println ("Команда обнвления");
-  //   MQTT_PUB_ALL();
-  //   interval = 6; // швырнуть данные на сервер и ждать 60 сек
-  //   at = "";
-  // } // Возвращаем ответ можема в монитор порта , очищаем переменную
-
   if (pin.indexOf("11") > -1)
   {
     pin = "",
