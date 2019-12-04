@@ -1,38 +1,20 @@
-#include <avr/wdt.h>
 #include <SoftwareSerial.h>
+
 //#include <DallasTemperature.h>      // https://github.com/milesburton/Arduino-Temperature-Control-Library
 
 #include <stdint.h>
 
-uint8_t mcusr_mirror __attribute__((section(".noinit")));
-
-void get_mcusr(void)
-    __attribute__((naked))
-    __attribute__((section(".init3")));
-void get_mcusr(void)
-{
-  mcusr_mirror = MCUSR;
-  MCUSR = 0;
-  wdt_disable();
-}
 
 //  ----------------------------------------- НАЗНАЧАЕМ ВЫВОДЫ для платок до 1.7.6 (c Arduino Pro Mini) ------------------------------
 
-SoftwareSerial SIM800(7, 6); // для старых плат начиная с версии RX,TX
+SoftwareSerial SIM800(27, 26); // для старых плат начиная с версии RX,TX
+#define SIM_PWR 23
+#define SIM_RST 5
+#define SIM_PWKEY 4
+
 #define ONE_WIRE_BUS 10      // пин датчика DS18B20, https://github.com/PaulStoffregen/OneWire
 #define FIRST_P_Pin 8        // на реле первого положения замка зажигания с 8-го пина ардуино
 #define SECOND_P 9           // на реле зажигания, через транзистор с 9-го пина ардуино
-#define STARTER_Pin 12       // на реле стартера, через транзистор с 12-го пина ардуино
-#define Lock_Pin 4           // реле на кнопку "заблокировать дверь"
-#define Unlock_Pin 11        // реле на кнопку "разаблокировать дверь"
-#define LED_Pin 13           // на светодиод (моргалку) 6-й транзистор
-#define BAT_Pin A0           // на батарею, через делитель напряжения 39кОм / 11 кОм
-#define Feedback_Pin A1      // на провод от замка зажигания для обратной связи по проводу ON
-#define STOP_Pin A2          // на концевик педали тормоза для отключения режима прогрева
-#define PSO_Pin A3           // на прочие датчики через делитель 39 kOhm / 11 kΩ
-#define K5 A5                // на плате не реализован, снимать сигнал с ардуинки
-#define IMMO A4              // на плате не реализован, снимать сигнал с ардуинк
-#define RESET_Pin 5          // аппаратная перезагрузка модема, по сути не задействован
 
 #define MODE_RESET 0 // ЖДЕМ SMS Ready, шлем "AT+CLIP=1;+DDET=1" ставм MODE_RESET_MODEM
 #define MODE_RESET_TIMER 60
@@ -95,40 +77,36 @@ void (*resetFunc)(void) = 0; //declare reset function @ address 0
 
 void setup()
 {
-  pinMode(RESET_Pin, OUTPUT);
+  pinMode(SIM_RST, OUTPUT);
+  pinMode(SIM_PWR, OUTPUT);
+  pinMode(SIM_PWKEY, OUTPUT);
+  
+  
   pinMode(FIRST_P_Pin, OUTPUT);
   pinMode(SECOND_P, OUTPUT);
-  pinMode(LED_Pin, OUTPUT);
-  pinMode(3, INPUT_PULLUP); //  для плат до 1.7.2 с оптопарами
-  pinMode(2, INPUT_PULLUP); //  для плат до 1.7.2 с оптопарами
 
   delay(100);
-  Serial.begin(9600); //скорость порта
+  Serial.begin(115200); //скорость порта
+  
   SIM800.begin(9600); //скорость связи с модемом
   Serial.println(version);
+  Serial.println("starting");
   SIM800_reset();
 }
 
 void SIM800_reset()
 {
   broker = false;
-  digitalWrite(RESET_Pin, LOW);
+  digitalWrite(SIM_PWR, HIGH);
+  digitalWrite(SIM_PWKEY, LOW);  
+  digitalWrite(SIM_RST, LOW);
   delay(400);
-  digitalWrite(RESET_Pin, HIGH); // перезагрузка модема
+  digitalWrite(SIM_RST, HIGH); // перезагрузка модема
   sendtry = 0;
   mode = MODE_RESET;
   modeTimer = MODE_RESET_TIMER;
   Serial.println("Modem reset");
-}
-
-// функция дергания реле блокировки/разблокировки дверей с паузой "удержания кнопки" в 0,5 сек.
-void blocking(bool st)
-{
-  digitalWrite(st ? Lock_Pin : Unlock_Pin, HIGH), delay(500), digitalWrite(st ? Lock_Pin : Unlock_Pin, LOW), Security = st, Serial.println(st ? "На охране" : "Открыто");
-}
-void callback()
-{
-  SIM800.println("ATD" + call_phone + ";"), delay(3000); // обратный звонок при появлении напряжения на входе IN1
+  SIM800.println("AT");
 }
 
 void loop()
@@ -153,16 +131,19 @@ void loop()
     {
       MQTT_PUB_ALL();
     }
-    if (modeTimer < 1)
+    if (modeTimer < 1){
+      Serial.println("Mode: "+String(mode)+" timer reached");
       SIM800_reset();
+      }
+      
   }
 
   if (millis() > Time1 + 10000)
     Time1 = millis(), detection(); // выполняем функцию detection () каждые 10 сек
-  if (relay1 == true && digitalRead(STOP_Pin) == 1)
-    relay1stop(); // для платок 1,7,2
-  if (relay2 == true && digitalRead(STOP_Pin) == 1)
-    relay2stop(); // для платок 1,7,2
+//  if (relay1 == true && digitalRead(STOP_Pin) == 1)
+//    relay1stop(); // для платок 1,7,2
+//  if (relay2 == true && digitalRead(STOP_Pin) == 1)
+//    relay2stop(); // для платок 1,7,2
 }
 
 void relay1start()
@@ -211,16 +192,16 @@ void relay2stop()
   MQTT_PUB_ALL();
 }
 
-float VoltRead()
-{ // замеряем напряжение на батарее и переводим значения в вольты
-  float ADCC = analogRead(BAT_Pin);
-  float realadcc = ADCC;
-  ADCC = ADCC / m;
-  Serial.print("АКБ: "), Serial.print(ADCC), Serial.print("V "), Serial.println(realadcc);
-  if (ADCC < V_min)
-    V_min = ADCC;
-  return (ADCC);
-} // переводим попугаи в вольты
+//float VoltRead()
+//{ // замеряем напряжение на батарее и переводим значения в вольты
+//  float ADCC = analogRead(BAT_Pin);
+//  float realadcc = ADCC;
+//  ADCC = ADCC / m;
+//  Serial.print("АКБ: "), Serial.print(ADCC), Serial.print("V "), Serial.println(realadcc);
+//  if (ADCC < V_min)
+//    V_min = ADCC;
+//  return (ADCC);
+//} // переводим попугаи в вольты
 
 void detection()
 { // условия проверяемые каждые 10 сек
@@ -329,7 +310,7 @@ void getLocation()
 }
 void MQTT_PUB_ALL()
 {
-  Vbat = VoltRead(); // замеряем напряжение на батарее
+  Vbat = 0; //VoltRead(); // замеряем напряжение на батарее
   if (sendtry > 2)
   {
     Serial.println("Reset by sendtry");
